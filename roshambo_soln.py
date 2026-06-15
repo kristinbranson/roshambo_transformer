@@ -1059,29 +1059,30 @@ test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=model_par
 # - What is returned by `x,y = dataset[i]`?
 # - What's a one-hot encoding? Why do we want this? 
 # - Why did we choose these features/representations?
-#
-# test out the datasets/dataloaders
-# example_x, example_y = train_dataset[0]
-# print('Input shapes:')
-# for k, v in example_x.items():
-#     if k != 'metadata':
-#         print(f"  {k}: {tuple(v.shape)}")
-# print(f"Output shape: {tuple(example_y.shape)}")
-#
-# example_x, example_y = train_dataset.getitem(0, dozscore=False)
-# print('\nInput (no zscore):')
-# for k, v in example_x.items():
-#     if k == 'metadata':
-#         print(f"{k}: {v}")
-#     else:
-#         print(f"{k}: shape: {tuple(v.shape)}\n{v}")
-# print(f"Output (no zscore): shape: {tuple(example_y.shape)}\n{example_y}")
-#
-# batch_x, batch_y = next(iter(train_dataloader))
-# print('\nBatch input shapes:')
-# print_nested_shapes(batch_x, indent=2)
-# print(f"Batch output shape: {tuple(batch_y.shape)}")
 
+
+# %%
+# test out the datasets/dataloaders
+example_x, example_y = train_dataset[0]
+print('Input shapes:')
+for k, v in example_x.items():
+    if k != 'metadata':
+        print(f"  {k}: {tuple(v.shape)}")
+print(f"Output shape: {tuple(example_y.shape)}")
+
+example_x, example_y = train_dataset.getitem(0, dozscore=False)
+print('\nInput (no zscore):')
+for k, v in example_x.items():
+    if k == 'metadata':
+        print(f"{k}: {v}")
+    else:
+        print(f"{k}: shape: {tuple(v.shape)}\n{v}")
+print(f"Output (no zscore): shape: {tuple(example_y.shape)}\n{example_y}")
+
+batch_x, batch_y = next(iter(train_dataloader))
+print('\nBatch input shapes:')
+print_nested_shapes(batch_x, indent=2)
+print(f"Batch output shape: {tuple(batch_y.shape)}")
 
 # %%
 # # sanity check: advancing the round-L window by the TRUE round-L moves should reproduce the round-(L+1) window
