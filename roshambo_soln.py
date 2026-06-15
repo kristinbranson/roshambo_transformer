@@ -8,14 +8,19 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.3
 #   kernelspec:
-#     display_name: tmp-data-format
+#     display_name: home
 #     language: python
 #     name: python3
 # ---
 
 # %% [markdown]
 # # 🪨📄✂️ Rock-Paper-Scissors Behavior Cloning
-# ### A transformer that predicts the next move
+# A transformer that predicts the next move in a game of rock-paper-scissors
+#
+# Goals: 
+# 1. Learn about behavior cloning 
+# 2. Learn about training networks with PyTorch: creating Datasets, networks, and optimization
+# 3. Learn about transformers and attention
 
 # %% [markdown]
 # ## 1. Setup
@@ -1579,10 +1584,9 @@ ax[2].set_title('head output'); ax[2].set_xlabel('head output feature'); ax[2].s
 # **Layer normalization**
 #
 # - Apply LayerNorm at various points to normalize each token's features to keep activations well-scaled.
-# **TODO change to pre-norm**
 # ```
-# x = LayerNorm(x + MultiHeadAttention(x))   # mix across time  (+ residual)
-# x = LayerNorm(x + MLP(x))                  # compute per token (+ residual)
+# x = x + MultiHeadAttention(LayerNorm(x))   # mix across time  (+ residual)
+# x = x + MLP(LayerNorm(x))                  # compute per token (+ residual)
 # ```
 # **Positional encoding**
 #
@@ -1684,6 +1688,9 @@ class TransformerModel(RPSMixin, nn.Module):
         return logits, loss
 
 
+
+# %%
+# nn.TransformerEncoderLayer??
 
 # %% [markdown]
 # ### Train the network
@@ -1865,13 +1872,23 @@ ax.set_ylim(0, 1)
 ax.set_title('Test Accuracy by Player Type')
 fig.tight_layout()
 
-print('Humans:')
-for player_id, acc in sorted(human_points, key=lambda x: x[1], reverse=True):
-    print(f'  {player_id}: {acc:.3f}')
+fig,ax = plt.subplots(2,1,figsize=(12, 10))
+order = np.argsort(y_human)
+ax[0].plot(np.array(y_human)[order],'.-')
+ax[0].set_xlabel('Rank')
+ax[0].set_ylabel('Accuracy')
+ax[0].set_title('Individual human accuracy')
 
-print('\nBots:')
-for bot_type in bot_types:
-    print(f'  {bot_type}: {bot_points[bot_type]:.3f}')
+order = np.argsort(list(bot_points.values()))
+ax[1].plot(np.array(list(bot_points.values()))[order],'.-')
+ax[1].set_xticks(np.arange(0,len(bot_points)))
+ax[1].set_xticklabels([list(bot_points.keys())[i] for i in order], rotation=45, ha='right')
+ax[1].set_ylabel('Accuracy')
+ax[1].set_title('Bot Accuracy by Algorithm')
+fig.tight_layout()
+
+# %%
+# show attention weights
 
 # %% [markdown]
 # ## 7. Exercises
