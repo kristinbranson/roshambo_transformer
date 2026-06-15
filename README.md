@@ -33,6 +33,12 @@ conda env create -f environment.yml
 conda activate roshambo-transformer
 ```
 
+To run using Google Colab:
+- Open Google Colab at https://colab.research.google.com/
+- In the "Open" dialog, select the "Github" panel and type https://github.com/kristinbranson/roshambo_transformer in the search bar
+- Select and open the notebook
+- If available, use a GPU to make training faster
+
 ## What The Tutorial Covers
 
 The notebook is organized around a gradual build-up:
