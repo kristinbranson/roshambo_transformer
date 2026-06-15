@@ -83,3 +83,7 @@ These raw data files are not part of this repository. The notebooks download the
 - Zhang et al. (2021), "Rock-Paper-Scissors Play: Beyond the Win-Stay/Lose-Change Strategy": [\[link\]](https://www.mdpi.com/2073-4336/12/3/52). Uses human and bot experiments to distinguish random play, Nash-like play, and richer sequential strategies beyond a simple win-stay/lose-change heuristic.
 - Xu, Zhou, & Wang (2013), "Cycle frequency in standard Rock-Paper-Scissors games: Evidence from experimental economics": [\[link\]](https://arxiv.org/abs/1301.3238). Reports laboratory evidence for persistent cycling in RPS population dynamics and connects the observations to non-equilibrium game dynamics.
 - Wang & Xu (2014), "Incentive and stability in the Rock-Paper-Scissors game: an experimental investigation": [\[link\]](https://arxiv.org/abs/1407.1170). Varies the payoff for winning in generalized RPS and shows that incentives change conditional responses, best-response behavior, and win-stay/lose-shift patterns.
+
+## Credits
+
+Developed by Kristin Branson <kristinbranson@gmail.com> 2026-06-15
