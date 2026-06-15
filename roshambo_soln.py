@@ -14,11 +14,11 @@
 # ---
 
 # %% [markdown]
-# # 🪨📄✂️ Rock-Paper-Scissors Behavior Cloning
+# # 🪨📄✂️ Rock-Paper-Scissors Behavior Forecasting
 # A transformer that predicts the next move in a game of rock-paper-scissors
 #
 # Goals: 
-# 1. Learn about behavior cloning 
+# 1. Learn about behavior forecasting 
 # 2. Learn about training networks with PyTorch: creating Datasets, networks, and optimization
 # 3. Learn about transformers and attention
 
@@ -93,14 +93,14 @@ DATA_CACHE_DIR = Path('rps_brockbank_data')
 
 model_params = {
     'context_length': 8, # how many past rounds the model can see
-    'batch_size': 64,
-    'd_embed': 96,
-    'n_head': 4,
-    'n_layer': 2,
-    'dropout': 0.2,
-    'learning_rate': 3e-3,
-    'weight_decay': 1e-2,
-    'n_epochs': 30,
+    'batch_size': 64, # number of samples in each training batch
+    'd_embed': 96, # dimensionlity of embeddings in transformer
+    'n_head': 4, # number of attention heads in transformer
+    'n_layer': 2, # number of transformer layers
+    'dropout': 0.2, # amount of dropout regularization to do during training
+    'learning_rate': 3e-3, # initial learning rate
+    'weight_decay': 1e-2, # regularization in Adam gradient dedscent
+    'n_epochs': 10, # number of epochs to train for
     'd_input': None, # per-round feature dim (moves/outcomes, and optionally totals), set after dataset is created
     'include_totals': True, # if False, ignore running score totals as an input feature
     'n_player_ids': None, # to be set after dataset is created
@@ -110,7 +110,7 @@ model_params = {
 }
 
 lr_scheduler_params = {
-    'max_lr': 3e-3,
+    'max_lr': 3e-3, 
     'epochs': model_params['n_epochs'],
     'pct_start': 0.3,
     'anneal_strategy': 'cos',
@@ -123,6 +123,8 @@ test_fraction = .1 # fraction of target rounds from each game reserved for the f
 
 torch.manual_seed(SEED)
 np.random.seed(SEED)
+
+# use GPU if available
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print('device:', device)
 
@@ -390,9 +392,36 @@ for source_name, game_id in example_game_ids_by_source.items():
 
 
 # %% [markdown]
-# ### Explore data
+# ### Exercise (i): Explore the data
+#
+# Compute, print, and plot some statistics of the data. 
+# Some ideas:
+# - Number of games
+# - Statistics of number of rounds per game
+# - Frequency of transitions from move0 to move1
+# - ...
 
 # %%
+# information about what is in the GameData object
+
+# first game
+game_id = list(games.keys())[0]
+game = games[game_id]
+print(f"\nExample game from {source_name}: {game_id}")
+display(games[game_id].show())
+
+print(f'Game game_id:')
+print(f'  moves: shape = (nrounds, nplayers=2) = {game.moves.shape}, dtype = {game.moves.dtype}')
+print(f'  moves[round,0] is move that this player makes at round round, ')
+print(f'  moves[round,1] is move that the opponet player makes at round round.')
+print(f'  player_ids: shape = (2,), dtype = {game.player_ids.dtype}')
+print(f'  player_ids[0] is the string identifier for this player')
+print(f'  player_ids[1] is the string identifier for the other player')
+print(f'  outcomes: shape = {game.outcomes.shape}, dtype: {game.outcomes.dtype}'  )
+print(f'  outcomes[round,player] is -1 if that player lost, 0 if they tied, and 1 if they won')
+print(f'  total[round,player]: shape: {game.total.shape}, dtype: {game.total.dtype}')
+print(f'  total[round,player] is the total number of points player had after round round.')
+
 # plot some summary statistics of the data
 all_moves    = np.concatenate([g.moves.ravel()    for g in games.values()])
 all_outcomes = np.concatenate([g.outcomes.ravel() for g in games.values()])
@@ -708,6 +737,33 @@ def print_nested_shapes(x, indent=0):
 
 # %% [markdown]
 # ## 3. Define PyTorch Dataset
+#
+# PyTorch Dataset class is useful for producing and iterating through training examples while training or evaluating. 
+#
+# You can define your own by inheriting from torch's Dataset class. 
+# You must define at least these three member functions:
+# ```
+# class MyDataset(torch.utls.data.Dataset):
+#
+# def __init__(self, ...):
+#     # constructor
+#     ...
+#
+# def __getitem__(self, i):
+#     # called when you run dataset[i]
+#     # returns the ith data example
+#     ...
+#     return x, y
+#
+# def __len__(self):
+#     # returns the number of examples in the dataset
+#     ...
+# ```
+#
+# We can create a `DataLoader` from a `Dataset`. This concatenates many examples into a batch. It can optionally shuffle the data and can be run in parallel to training updates. You create a DataLoader by
+# ```
+# my_dataloader = torch.utils.data.DataLoader(my_dataset, batch_size=batch_size, shuffle=True)
+# ```
 
 # %%
 class RPSSequenceDataset(torch.utils.data.Dataset):
@@ -996,27 +1052,35 @@ train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=model_p
 holdout_dataloader = torch.utils.data.DataLoader(holdout_dataset, batch_size=model_params['batch_size'], shuffle=False)
 test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=model_params['batch_size'], shuffle=False)
 
+
+# %% [markdown]
+# ### Exercise (ii). Explore the Dataset
+#
+# - What is returned by `x,y = dataset[i]`?
+# - What's a one-hot encoding? Why do we want this? 
+# - Why did we choose these features/representations?
+#
 # test out the datasets/dataloaders
-example_x, example_y = train_dataset[0]
-print('Input shapes:')
-for k, v in example_x.items():
-    if k != 'metadata':
-        print(f"  {k}: {tuple(v.shape)}")
-print(f"Output shape: {tuple(example_y.shape)}")
-
-example_x, example_y = train_dataset.getitem(0, dozscore=False)
-print('\nInput (no zscore):')
-for k, v in example_x.items():
-    if k == 'metadata':
-        print(f"{k}: {v}")
-    else:
-        print(f"{k}: shape: {tuple(v.shape)}\n{v}")
-print(f"Output (no zscore): shape: {tuple(example_y.shape)}\n{example_y}")
-
-batch_x, batch_y = next(iter(train_dataloader))
-print('\nBatch input shapes:')
-print_nested_shapes(batch_x, indent=2)
-print(f"Batch output shape: {tuple(batch_y.shape)}")
+# example_x, example_y = train_dataset[0]
+# print('Input shapes:')
+# for k, v in example_x.items():
+#     if k != 'metadata':
+#         print(f"  {k}: {tuple(v.shape)}")
+# print(f"Output shape: {tuple(example_y.shape)}")
+#
+# example_x, example_y = train_dataset.getitem(0, dozscore=False)
+# print('\nInput (no zscore):')
+# for k, v in example_x.items():
+#     if k == 'metadata':
+#         print(f"{k}: {v}")
+#     else:
+#         print(f"{k}: shape: {tuple(v.shape)}\n{v}")
+# print(f"Output (no zscore): shape: {tuple(example_y.shape)}\n{example_y}")
+#
+# batch_x, batch_y = next(iter(train_dataloader))
+# print('\nBatch input shapes:')
+# print_nested_shapes(batch_x, indent=2)
+# print(f"Batch output shape: {tuple(batch_y.shape)}")
 
 
 # %%
@@ -1075,10 +1139,37 @@ print(f"Batch output shape: {tuple(batch_y.shape)}")
 # $$
 #
 # ### Define logistic regression model in PyTorch
+#
+# When defining networks in PyTorch, we always inherit from `nn.Module` class. We need to define the following member functions:
+# ```
+# class MyModel(nn.Module):
+#     def __init__(self, ...):
+#         """
+#         Constructor should define other modules that the network will layer on each other
+#         """
+#         super().__init__() # call parent class constructor
+#         self.my_layer1 = nn.Embedding(...)
+#         self.my_layer2 = nn.Linear(...)
+#         ...
+#
+#     def forward(self, x, targets=None):
+#         """
+#         Define the function the network computes when you run 
+#         mymodel(x,y)
+#         """
+#         x1 = F.relu(self.my_layer1(x))
+#         y = self.my_layer2(x)
+#         loss = None
+#         if targets is not None:
+#             loss = F.cross_entropy(y,targets)
+#         return y, loss
+# ```
+# I will define a logistic regression model and train it. You will define and train a transformer below. 
 
 # %%
 class LogisticRegressionModel(RPSMixin, nn.Module):
     """Per-round multinomial logistic regression with a learned player-id embedding."""
+    # also inherit from RPSMixin, which has some code for rock-paper-scissors-related stuff
 
     def __init__(self, p):
         """Initialize the model with parameters p, which should include:
@@ -1113,8 +1204,12 @@ class LogisticRegressionModel(RPSMixin, nn.Module):
         if squeezed:
             x = {k: v.unsqueeze(0) if torch.is_tensor(v) else v for k, v in x.items()}
         
-        # Turn each round into one feature vector, then add a learned logits bias for the chosen
-        # "self" player only (not the opponent identity).
+        # _stack_features returns:
+        # self_player_id: shape (B,), this player's identity (not the opponent's)
+        # round_features: shape (B,T,D=2*(3+1+1)), consists of, for each player:
+        #   - one-hot encoding of move, 
+        #   - win/lose/tie outcome 
+        #   - score (if include_totals == True)
         self_player_id, round_features = self._stack_features(x)
         B, T, _ = round_features.shape
         
@@ -1158,7 +1253,39 @@ print(f"next-move accuracy for sample batch: {acc:.3f}   (chance = {1/len(NAMES)
 
 
 # %% [markdown]
+# ### Exercise (iii). Understand the logistic regression model architecture
+#
+# - What is `nn.Linear`? 
+# - What is `nn.Embedding`? 
+# - What is the equation for our logistic regression network?
+
+# %% [markdown]
 # #### Train logistic regression
+#
+# We will use stochastic gradient descent to train our network. 
+# - We will compute the gradient of our loss for a small **batch** of the data. 
+# - We will take a small step in the negative gradient direction.
+# - We will do this iteratively many times. One pass through all the training data is called an **epoch**:
+# ```
+# for epoch in range(n_epochs):
+#     for x_batch,y_batch in train_dataloader:
+#         # compute the loss for this batch
+#         _, loss = model(xb.to(device), yb.to(device))
+#
+#         # zero out the gradients
+#         optimizer.zero_grad()
+#         
+#         # compute gradient of loss wrt model parameters
+#         loss.backward()
+#         
+#         # update the model weights using the optimizer
+#         optimizer.step()
+#         
+#         # update the learning rate
+#         if scheduler is not None:
+#             scheduler.step()
+# ```
+#
 
 # %%
 # create the model
@@ -1242,10 +1369,19 @@ for epoch in range(n_epochs_logistic_regression):
         xb = batch_to_device(xb, device)
         yb = yb.to(device)
 
+        # compute the loss for this batch
         logits, loss = model(xb, yb)
-        optimizer.zero_grad(set_to_none=True)
+        
+        # zero out the gradients
+        optimizer.zero_grad()
+        
+        # compute gradient of loss wrt model parameters
         loss.backward()
+        
+        # update the model weights using the optimizer
         optimizer.step()
+        
+        # update the learning rate
         if scheduler is not None:
             scheduler.step()
         lr = optimizer.param_groups[0]['lr']
@@ -1311,6 +1447,9 @@ display(full_game.show(start=len(prompt_game)))
 # From Karpathy's Let's build GPT from scratch, in code, spelled out
 # https://www.youtube.com/watch?v=kCc8FmEb1nY
 # (more lessons from Karpathy here https://karpathy.ai/zero-to-hero.html)
+#
+# One very simple idea of how to predict the value for `x[t]` given `x[:t]` is just to use the mean. 
+# Let's look at a matric multiplication trick for doing this for all `t`
 
 # %%
 # toy example illustrating how matrix multiplication can be used for a "weighted aggregation"
@@ -1331,16 +1470,32 @@ print('xbow1[0]:\n', xbow1[0])
 
 # version 2: using matrix multiply for a weighted aggregation
 tril = torch.tril(torch.ones(T, T))
-wei = torch.zeros((T,T)) # set some weights, for now all the same
+wei = torch.zeros((T,T)) # set some weights
 wei = wei.masked_fill(tril == 0, float('-inf')) # mask out the upper triangle so we only attend to current and past positions
-print('wei (pre-softmax):\n', wei)
-wei = F.softmax(wei, dim=-1) # normalize 
+print('wei (pre-softmax):\n', wei) 
+wei = F.softmax(wei, dim=-1)
 print('wei (after softmax):\n', wei)
+# wei[t1,t2] = 1 / (t1+1) if t2 <= t1 else 0
+
+# matrix multiplication:
+# xbow2[b,c] = wei[t,:] dot x[b,:,c] = sum_t2 wei[t,t2] * x[b,t2,c] = sum_{t2<=t} (1/(t+1)) * x[b,t2,c] = mean_{t2<=t} x[b,t2,c]
 xbow2 = wei @ x
 assert torch.allclose(xbow1, xbow2), "matrix multiply version should match the loop version"
 
 
 # %% [markdown]
+# Now let's give each previous timepoint a weight that depends on how much we care about it.
+#
+# $$ xbow_{t} = \sum_{t' \leq t} sim(x_t,x_{t'}) f(x_{t'}) $$
+#
+# We will choose a new space defined by linear projections $W^Q$ and $W^K$:
+#
+# $$ sim(x_t, x_{t'}) = \text{softmax}((W^Q x_t) \cdot (W^K x_{t'})) $$
+#
+# and we will choose a function of $x_{t'}$ that is another linear projection:
+#
+# $$ f(x_{t'}) = W^V x_{t'} $$
+#
 # Illustrations from https://jalammar.github.io/illustrated-transformer/
 #
 # The query, key, and value matrices:
@@ -1360,47 +1515,57 @@ x = torch.randn(B,T,C)
 d_head = C
 
 # randomly initialized linear maps for query and key, defines the space in which we compute similarity for attention
-key = nn.Linear(C, d_head, bias=False)
-query = nn.Linear(C, d_head, bias=False)
+key = nn.Linear(C, d_head, bias=False) # key.weight is shape (C,d_head)
+query = nn.Linear(C, d_head, bias=False) # query.weight is shape (C,d_head)
 fig,ax = plt.subplots(1, 2, figsize=(10,5))
+
+# plot the key and query projection matrices
 ax[0].imshow(key.weight.detach().cpu().numpy())
 ax[0].set_title('key weights')
-ax[0].set_xlabel('input feature'); ax[0].set_ylabel('head output')
+ax[0].set_xlabel('input feature (C)'); ax[0].set_ylabel('head output dim (d_head)')
 ax[1].imshow(query.weight.detach().cpu().numpy())
 ax[1].set_title('query weights')
-ax[1].set_xlabel('input feature'); ax[1].set_ylabel('head output')
+ax[1].set_xlabel('input feature (C)'); ax[1].set_ylabel('head output dim (d_head)')
 
-# multiply
-k = key(x)   # (B,T,d_head)
-q = query(x) # (B,T,d_head)
+# multiply to project x to the key space
+k = key(x) # shape (B,T,d_head)
+assert torch.allclose(x @ key.weight.T, k) # = x @ key.weight.T 
 
+# multiply to project x to the query space
+q = query(x) # = x @ query.weight.T, shape (B,T,d_head)
+
+# plot the key and query representations for the first example in the batch
 fig, ax = plt.subplots(1, 2, figsize=(10,5))
 ax[0].imshow(k[0].detach().cpu().numpy())
 ax[0].set_title('key (k)')
-ax[0].set_xlabel('head output'); ax[0].set_ylabel('time')
+ax[0].set_xlabel('head output dim (d_head)'); ax[0].set_ylabel('time (T)')
 ax[1].imshow(q[0].detach().cpu().numpy())
 ax[1].set_title('query (q)')
-ax[1].set_xlabel('head output'); ax[1].set_ylabel('time')
+ax[1].set_xlabel('head output dim (d_head)'); ax[1].set_ylabel('time (T)')
 
 # compute dot product between query and key at each position, to get the raw attention scores
+# how much do we care about input at t1 at time t2? 
 # (B, T, d_head) @ (B, d_head, T) -> (B, T, T)
 # dim 1 corresponds to query position and dim 2 corresponds to key position
 wei = q @ k.transpose(-2, -1) * d_head**-0.5 # (B,T,T) raw attention scores for each query position attending to each key position
 
+# show the raw attention scores for the first example in the batch
 fig, ax = plt.subplots(figsize=(6,5))
 ax.imshow(wei[0].detach().cpu().numpy())
 ax.set_title('raw attention scores')
-ax.set_xlabel('key position'); ax.set_ylabel('query position')
+ax.set_xlabel('key position (T)'); ax.set_ylabel('query position (T)')
 
 # mask out the upper triangle so we only attend to current and past positions
 tril = torch.tril(torch.ones(T, T))
 wei = wei.masked_fill(tril == 0, float('-inf'))
+
+# show the masked attention scores for the first example in the batch
 fig, ax = plt.subplots(figsize=(6,5))
 him = ax.imshow(wei[0].detach().cpu().numpy())
 # colorbar
 fig.colorbar(him, ax=ax)
 ax.set_title('masked attention scores, pre-softmax');
-ax.set_xlabel('key position'); ax.set_ylabel('query position')
+ax.set_xlabel('key position (T)'); ax.set_ylabel('query position (T)')
 
 # normalize the attention scores to get the attention weights
 wei = F.softmax(wei, dim=-1)
@@ -1409,24 +1574,26 @@ him = ax.imshow(wei[0].detach().cpu().numpy())
 # colorbar
 fig.colorbar(him, ax=ax)
 ax.set_title('attention weights, post-softmax')
-ax.set_xlabel('key position'); ax.set_ylabel('query position')
+ax.set_xlabel('key position (T)'); ax.set_ylabel('query position (T)')
 
 # apply the weighting to values instead of x, to get the full attention mechanism
 value = nn.Linear(C, d_head, bias=False)
 v = value(x) # (B,T,d_head)
 out = wei @ v # (B,T,T) @ (B,T,d_head) -> (B,T,d_head) weighted aggregation of values at each position according to attention weights
 ncols = [x.shape[-1], v.shape[-1], out.shape[-1]]   # e.g. [D, d_head, d_head]
+
+# plot the input, value, and output for the first example in the batch
 fig, ax = plt.subplots(1, 3, figsize=(15,5), sharey=True,
                        gridspec_kw={'width_ratios': ncols})
 ax[0].imshow(x[0].detach().cpu().numpy())
 ax[0].set_title('input')
-ax[0].set_xlabel('input feature'); ax[0].set_ylabel('time')
+ax[0].set_xlabel('input feature (C)'); ax[0].set_ylabel('time (T)')
 ax[1].imshow(v[0].detach().cpu().numpy())
 ax[1].set_title('value (v)')
-ax[1].set_xlabel('head output'); ax[1].set_ylabel('time')
+ax[1].set_xlabel('head output dim (d_head)'); ax[1].set_ylabel('time (T)')
 ax[2].imshow(out[0].detach().cpu().numpy())
 ax[2].set_title('attention output')
-ax[2].set_xlabel('head output'); ax[2].set_ylabel('time')
+ax[2].set_xlabel('head output dim (d_head)'); ax[2].set_ylabel('time (T)')
 
 
 # %% [markdown]
@@ -1438,7 +1605,9 @@ ax[2].set_xlabel('head output'); ax[2].set_ylabel('time')
 # - **Self-attention** just means that the keys and values are produced from the same source as queries.
 # - "Scaled" attention additional divides wei by 1/sqrt(head_size). This makes it so when input Q,K are unit variance, wei will be unit variance too and Softmax will stay diffuse and not saturate too much. Illustration below
 #
-# ### Define an attention head module
+# ### Exercise (iv). Define an attention head
+#
+# Fill in the missing forward function below. It should mirror the transformations in the previous code cell
 
 # %%
 class Head(nn.Module):
@@ -1454,6 +1623,7 @@ class Head(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
+        
         B,T,C = x.shape
         k = self.key(x)   # (B,T,C)
         q = self.query(x) # (B,T,C)
@@ -1534,7 +1704,6 @@ ax[1].set_title('permuted input'); ax[1].set_xlabel('input feature'); ax[1].set_
 ax[2].imshow(out[0].detach().cpu().numpy())
 ax[2].set_title('head output'); ax[2].set_xlabel('head output feature'); ax[2].set_ylabel('time')
 
-
 # %% [markdown]
 # ### Other stuff in a transformer layer
 #
@@ -1594,12 +1763,22 @@ ax[2].set_title('head output'); ax[2].set_xlabel('head output feature'); ax[2].s
 # - So we inject position info before the blocks: **learned** (a trainable vector per
 #   position), **sinusoidal** (fixed `sin`/`cos`), or **RoPE** (rotate Q/K by position).
 # - For this fixed context window, the model below uses a **learned positional embedding table**.
+# - We add the positional embedding to our input embedding
 #
 
 # %% [markdown]
 # ## 6. Train a Transformer
 #
-# ### Define the model architecture
+# ### Exercise (v). Define the transformer model
+#
+# Look at what we did when defining the LogisticRegressionModel to help you define a transformer model. You should use the following torch modules:
+# - `nn.TransformerEncoderLayer`
+# - `nn.TransformerEncoder`
+
+# %%
+help(nn.TransformerEncoderLayer)
+help(nn.TransformerEncoder)
+
 
 # %%
 # define a transformer model using PyTorch's built in TransformerEncoder module
@@ -1689,11 +1868,10 @@ class TransformerModel(RPSMixin, nn.Module):
 
 
 
-# %%
-# nn.TransformerEncoderLayer??
-
 # %% [markdown]
-# ### Train the network
+# ### Exercise (vi). Optimize the transformer network
+#
+# This code should look almost identical to the code for training the logistic regression network.
 
 # %%
 # create the model
@@ -1795,6 +1973,8 @@ ax[1].legend()
 
 # %% [markdown]
 # ### Evaluation
+#
+# Let's look at how well we're doing on different "types" of players.
 
 # %%
 def compute_test_accuracy_by_player_id(dataloader, dataset, model, device):
@@ -1887,19 +2067,17 @@ ax[1].set_ylabel('Accuracy')
 ax[1].set_title('Bot Accuracy by Algorithm')
 fig.tight_layout()
 
-# %%
-# show attention weights
-
 # %% [markdown]
-# ## 7. Exercises
+# ## 7. Directions to explore
 #
-# 1. Compare to models more complicated than logistic regression and simpler than transformers. 
+# 1. Compare results to models more complicated than logistic regression but simpler than transformers. 
 # 2. Try to make the transformer perform better.
 # 3. Play against a partner and create a new dataset. Retrain the transformer on this. Play against the transformer. 
 # 4. Interpretability: how do we figure out what the transformer is doing? 
-#   - Think of some known strategies of humans in rock-paper-scissors, e.g. win-stay, lose-shift
-#   - Try to find a representation of that strategy in the network
-# 5. How well can an LLM do this? Prompt ChatGPT, Claude, Qwen etc. with something like: 
+#     - Think of some known strategies of humans in rock-paper-scissors, e.g. win-stay, lose-shift
+#     - Try to find a representation of that strategy in the network
+# 5. Look at the weight the network is giving to different time points for a given input sequence. 
+# 6. How well can an LLM do this? Prompt ChatGPT, Claude, Qwen etc. with something like: 
 # "I am playing rock-paper-scissors. Here is the sequence of moves me and my opponent have made (me, opponent):
 # (rock, scissors), (scissors, paper), \[etc.\]
 # What will my opponent play next?" 
