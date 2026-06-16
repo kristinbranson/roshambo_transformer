@@ -32,6 +32,7 @@ You can create this environment from the provided yml file:
 conda env create -f environment.yml
 conda activate roshambo-transformer
 ```
+Note: `environment.yml` installs PyTorch using the default pip package. This is fine for CPU use and many local setups, but it does not explicitly select a CUDA build. If you have an NVIDIA GPU and want CUDA acceleration, install PyTorch using the command recommended by the official PyTorch selector for your OS and CUDA version: https://pytorch.org/get-started/locally/.
 
 To run using Google Colab:
 - Open Google Colab at https://colab.research.google.com/
