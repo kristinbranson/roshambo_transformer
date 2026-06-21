@@ -29,6 +29,8 @@
 # ### Imports
 
 # %%
+# %load_ext autoreload
+# %autoreload 2
 import sys
 
 import torch
@@ -1408,7 +1410,6 @@ for epoch in range(n_epochs_logistic_regression):
             print(f"Early stopping after epoch {epoch+1}: no holdout improvement for {patience} epochs.")
             break
 
-pbar.close()
 model.load_state_dict(best_state)
 
 print(f"Best holdout checkpoint: epoch {best_epoch}")
@@ -1918,6 +1919,7 @@ print(f"Before training: train loss: {all_loss['train'][-1]:.4f}, train acc: {al
 
 # iterate over epochs
 for epoch in range(model_params['n_epochs']):
+    print(f'Epoch {epoch+1}/{model_params["n_epochs"]}')
     # iterate over batches
     for xb, yb in train_dataloader:
         xb = batch_to_device(xb, device)
@@ -1951,8 +1953,6 @@ for epoch in range(model_params['n_epochs']):
         if epochs_without_improvement >= patience:
             print(f"Early stopping after epoch {epoch+1}: no holdout improvement for {patience} epochs.")
             break
-
-pbar.close()
 
 model.load_state_dict(best_state)
 print(f"Best holdout checkpoint: epoch {best_epoch}")
@@ -2082,3 +2082,449 @@ fig.tight_layout()
 # "I am playing rock-paper-scissors. Here is the sequence of moves me and my opponent have made (me, opponent):
 # (rock, scissors), (scissors, paper), \[etc.\]
 # What will my opponent play next?" 
+
+# %% [markdown]
+# ## Interpretability
+
+# %%
+from torch.utils.data._utils.collate import default_collate
+
+def WSLS_strategy_labels(x,y):
+    """
+    Create labels for the win-stay lose-shift (WSLS) strategy, which is a simple heuristic that many humans use in RPS.
+    The WSLS strategy says that if you win a round, you should repeat the same move, if you lose a round, you should switch to 
+    the move that beats your previous move (the next move in the sequence rock-paper-scissors). Ties are ignored. 
+    Returns:
+        labels: (B, T), 1 if next move follows win-stay / lose-shift
+        valid:  (B, T), which positions to train on
+    """
+    
+    prev_move = x["moves"][..., 0, :].argmax(dim=-1)  # self move at t
+    outcome = x["outcomes"][..., 0].round().long()    # self outcome at t
+    next_move = y.argmax(dim=-1)                      # self move at t+1
+
+    win_stay = (outcome == OUTCOME["win"]) & (next_move == prev_move)
+
+    lose_shift = (outcome == OUTCOME["loss"]) & (next_move == beats(prev_move))
+
+    labels = (win_stay | lose_shift).float()
+
+    # ignore ties entirely
+    valid = outcome != OUTCOME["tie"]
+
+    return labels, valid
+
+
+@torch.no_grad()
+def get_transformer_activity_hook(model, x, layer_idx="final"):
+    """
+    Get the hidden activations of the transformer model at a specified layer for a batch of examples.
+    Arguments:
+        model: TransformerModel
+        x: batch of examples, dict with keys "moves", "outcomes", "player_ids"
+        layer_idx:
+            "input" -> after round/player/position embeddings
+            0, 1, ... -> after that TransformerEncoderLayer
+            "final" -> after all transformer layers and final layer norm
+    Returns:
+        h: (B, T, d_embed) tensor of hidden activations at the specified layer
+    """
+    model.eval()
+    device = next(model.parameters()).device
+    x = batch_to_device(x, device)
+
+    activity = {}
+
+    if layer_idx == "input":
+        def hook(module, inputs, output):
+            activity["h"] = inputs[0].detach()
+
+        handle = model.encoder.register_forward_hook(hook)
+
+    elif layer_idx == "final":
+        def hook(module, inputs, output):
+            activity["h"] = output.detach()
+
+        handle = model.ln_f.register_forward_hook(hook)
+
+    else:
+        def hook(module, inputs, output):
+            activity["h"] = output.detach()
+
+        handle = model.encoder.layers[layer_idx].register_forward_hook(hook)
+
+    try:
+        model(x)
+    finally:
+        handle.remove()
+
+    return activity["h"]
+
+def make_wsls_probe_collate(model, layer_idx="final"):
+    def collate(batch):
+        x, y = default_collate(batch)
+
+        h = get_transformer_activity_hook(model, x, layer_idx=layer_idx)
+
+        labels, valid = WSLS_strategy_labels(x, y)
+        labels = labels.to(h.device)
+        valid = valid.to(h.device)
+
+        return h[valid], labels[valid]
+
+    return collate
+
+def freeze_model(model):
+    old_requires_grad = [p.requires_grad for p in model.parameters()]
+    was_training = model.training
+    for p in model.parameters():
+        p.requires_grad_(False)
+    model.eval()
+    return old_requires_grad, was_training
+
+def restore_model(model, old_requires_grad, was_training):
+    for p, req_grad in zip(model.parameters(), old_requires_grad):
+        p.requires_grad_(req_grad)
+    if was_training:
+        model.train()
+    else:
+        model.eval()
+        
+def make_loader(model, dataset, layer_idx, shuffle, batch_size, collate_fn_factory):
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=collate_fn_factory(model, layer_idx=layer_idx)
+    )
+    
+def estimate_wsls_pos_weight(dataset, batch_size=None):
+    batch_size = model_params["batch_size"] if batch_size is None else batch_size
+
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=default_collate,
+    )
+
+    n_pos = 0
+    n_neg = 0
+
+    for x, y in loader:
+        labels, valid = WSLS_strategy_labels(x, y)
+        labels = labels[valid]
+
+        n_pos += (labels == 1).sum().item()
+        n_neg += (labels == 0).sum().item()
+
+    return n_neg / max(n_pos, 1), n_pos, n_neg
+
+train_pos_weight, train_n_pos, train_n_neg = estimate_wsls_pos_weight(
+    train_dataset,
+)
+print(
+    f"WSLS probe labels: "
+    f"pos={train_n_pos}, neg={train_n_neg}, pos_weight={train_pos_weight:.3f}"
+)
+
+loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(train_pos_weight, device=device))   
+def binary_probe_metrics(labels, probs):
+    labels = labels.detach().cpu().float()
+    probs = probs.detach().cpu().float()
+    pred = (probs > 0.5).float()
+
+    acc = (pred == labels).float().mean().item()
+
+    is_pos = labels == 1
+    is_neg = labels == 0
+
+    pos_acc = np.nan
+    neg_acc = np.nan
+    balanced_acc = np.nan
+
+    if is_pos.any():
+        pos_acc = (pred[is_pos] == labels[is_pos]).float().mean().item()
+    if is_neg.any():
+        neg_acc = (pred[is_neg] == labels[is_neg]).float().mean().item()
+    if is_pos.any() and is_neg.any():
+        balanced_acc = 0.5 * (pos_acc + neg_acc)
+
+    return {
+        "acc": acc,
+        "balanced_acc": balanced_acc,
+        "pos_acc": pos_acc,
+        "neg_acc": neg_acc,
+        "positive_fraction": labels.mean().item(),
+    }
+    
+@torch.no_grad()
+def evaluate_probe_decoder(decoder, probe_loader):
+    
+    decoder.eval()
+    device = next(decoder.parameters()).device
+
+    total_loss = 0.0
+    total_n = 0
+
+    all_labels = []
+    all_probs = []
+
+    for h, labels in probe_loader:
+        if labels.numel() == 0:
+            continue
+
+        h = h.to(device)
+        labels = labels.to(device)
+
+        logits = decoder(h).squeeze(-1)
+        loss = loss_fn(logits, labels)
+        probs = torch.sigmoid(logits)
+
+        total_loss += loss.item() * labels.numel()
+        total_n += labels.numel()
+
+        all_labels.append(labels.detach().cpu())
+        all_probs.append(probs.detach().cpu())
+
+    if total_n == 0:
+        return {
+            "loss": np.nan,
+            "acc": np.nan,
+            "balanced_acc": np.nan,
+            "pos_acc": np.nan,
+            "neg_acc": np.nan,
+            "positive_fraction": np.nan,
+            "n": 0,
+            "labels": torch.tensor([]),
+            "probs": torch.tensor([]),
+        }
+
+    labels = torch.cat(all_labels)
+    probs = torch.cat(all_probs)
+    metrics = binary_probe_metrics(labels, probs)
+
+    return {
+        "loss": total_loss / total_n,
+        "n": total_n,
+        "labels": labels,
+        "probs": probs,
+        **metrics,
+    }
+
+def print_evaluation_results(metrics):
+    print(
+        f"  loss={metrics['loss']:.4f}\n"
+        f"  acc={metrics['acc']:.3f}\n"
+        f"  balanced_acc={metrics['balanced_acc']:.3f}\n"
+        f"  pos_acc={metrics['pos_acc']:.3f}\n"
+        f"  neg_acc={metrics['neg_acc']:.3f}\n"
+        f"  positive_fraction={metrics['positive_fraction']:.3f}\n"
+        f"  n={metrics['n']}"
+    )
+def probe(
+    model,
+    train_dataset,
+    collate_fn_factory,
+    layer_idx,
+    n_epochs=10,
+    holdout_dataset=None,
+    test_dataset=None,
+    batch_size=None,
+    lr=1e-3,
+    weight_decay=1e-3,
+):
+    device = next(model.parameters()).device
+    batch_size = model_params["batch_size"] if batch_size is None else batch_size
+
+    old_requires_grad, was_training = freeze_model(model)
+
+    train_probe_loader = make_loader(
+        model,
+        train_dataset,
+        layer_idx,
+        shuffle=True,
+        batch_size=batch_size,
+        collate_fn_factory=collate_fn_factory,
+    )
+
+    holdout_probe_loader = None
+    if holdout_dataset is not None:
+        holdout_probe_loader = make_loader(
+            model,
+            holdout_dataset,
+            layer_idx,
+            shuffle=False,
+            batch_size=batch_size,
+            collate_fn_factory=collate_fn_factory,
+        )
+
+    test_probe_loader = None
+    if test_dataset is not None:
+        test_probe_loader = make_loader(
+            model,
+            test_dataset,
+            layer_idx,
+            shuffle=False,
+            batch_size=batch_size,
+            collate_fn_factory=collate_fn_factory,
+        )
+
+    d_embed = model.head.in_features
+    decoder = nn.Linear(d_embed, 1).to(device)
+
+    opt = torch.optim.AdamW(decoder.parameters(), lr=lr, weight_decay=weight_decay)
+    
+
+
+    history = {
+        "train": {"loss": [], "acc": [], "balanced_acc": []},
+        "holdout": {"loss": [], "acc": [], "balanced_acc": []},
+    }
+
+    pbar = tqdm(
+        total=n_epochs * len(train_probe_loader),
+        desc=f"probe layer {layer_idx}",
+        leave=True,
+    )
+
+    test_metrics = None
+
+    try:
+        for epoch in range(n_epochs):
+            decoder.train()
+
+            total_loss = 0.0
+            total_n = 0
+
+            train_labels = []
+            train_probs = []
+
+            for h, labels in train_probe_loader:
+                if labels.numel() == 0:
+                    pbar.update(1)
+                    continue
+
+                h = h.to(device)
+                labels = labels.to(device)
+
+                logits = decoder(h).squeeze(-1)
+                loss = loss_fn(logits, labels)
+
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+
+                with torch.no_grad():
+                    probs = torch.sigmoid(logits)
+
+                    total_loss += loss.item() * labels.numel()
+                    total_n += labels.numel()
+
+                    train_labels.append(labels.detach().cpu())
+                    train_probs.append(probs.detach().cpu())
+
+                    running_labels = torch.cat(train_labels)
+                    running_probs = torch.cat(train_probs)
+                    running_metrics = binary_probe_metrics(
+                        running_labels,
+                        running_probs,
+                    )
+
+                pbar.set_postfix(
+                    {
+                        "epoch": epoch,
+                        "train_loss": total_loss / total_n,
+                        "train_bal_acc": running_metrics["balanced_acc"],
+                    }
+                )
+                pbar.update(1)
+
+            train_labels = torch.cat(train_labels)
+            train_probs = torch.cat(train_probs)
+            train_metrics = binary_probe_metrics(train_labels, train_probs)
+            train_loss = total_loss / total_n
+
+            history["train"]["loss"].append(train_loss)
+            history["train"]["acc"].append(train_metrics["acc"])
+            history["train"]["balanced_acc"].append(train_metrics["balanced_acc"])
+
+            postfix = {
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "train_bal_acc": train_metrics["balanced_acc"],
+            }
+
+            if holdout_probe_loader is not None:
+                holdout_metrics = evaluate_probe_decoder(
+                    decoder,
+                    holdout_probe_loader,
+                )
+
+                history["holdout"]["loss"].append(holdout_metrics["loss"])
+                history["holdout"]["acc"].append(holdout_metrics["acc"])
+                history["holdout"]["balanced_acc"].append(
+                    holdout_metrics["balanced_acc"]
+                )
+
+                postfix.update(
+                    {
+                        "holdout_loss": holdout_metrics["loss"],
+                        "holdout_bal_acc": holdout_metrics["balanced_acc"],
+                    }
+                )
+
+            pbar.set_postfix(postfix)
+
+        if test_probe_loader is not None:
+            test_metrics = evaluate_probe_decoder(
+                decoder,
+                test_probe_loader,
+            )
+
+            print("Test set evaluation:")
+            print_evaluation_results(test_metrics)
+
+    finally:
+        restore_model(model, old_requires_grad, was_training)
+
+    return decoder, history, test_metrics
+
+# %%
+# train the decoder on the final layer activity
+decoder, history, test_metrics = probe(
+    model=model,
+    train_dataset=train_dataset,
+    holdout_dataset=holdout_dataset,
+    test_dataset=test_dataset,
+    collate_fn_factory=make_wsls_probe_collate,
+    layer_idx="final",
+    n_epochs=2,
+)
+
+# %%
+# try on different layers
+layer_idxs = ['input'] + list(range(model_params['n_layer'])) + ['final']
+test_metrics_by_layer = {}
+for layer_idx in layer_idxs:
+    print(f"Probing layer {layer_idx}")
+    decoder, history, test_metrics = probe(
+        model=model,
+        train_dataset=train_dataset,
+        holdout_dataset=holdout_dataset,
+        test_dataset=test_dataset,
+        collate_fn_factory=make_wsls_probe_collate,
+        layer_idx=layer_idx,
+        n_epochs=2,
+    )
+    test_metrics_by_layer[layer_idx] = test_metrics
+
+# %%
+# plot the results
+fig, ax = plt.subplots(1, 1, figsize=(12, 5))
+ax.plot([layer_idx for layer_idx in layer_idxs], [test_metrics_by_layer[layer_idx]['balanced_acc'] for layer_idx in layer_idxs], '.-')
+ax.set_xticks(range(len(layer_idxs)))
+ax.set_xticklabels([str(layer_idx) for layer_idx in layer_idxs])
+ax.set_xlabel("Layer")
+ax.set_ylabel("Balanced Accuracy")
+ax.set_title("Balanced Accuracy by Layer")
