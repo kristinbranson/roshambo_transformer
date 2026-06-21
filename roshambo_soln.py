@@ -29,9 +29,19 @@
 # ### Imports
 
 # %%
-# %load_ext autoreload
-# %autoreload 2
 import sys
+
+try:
+    ip = get_ipython()
+except NameError:
+    ip = None
+
+if ip is not None:
+    try:
+        ip.run_line_magic("reload_ext", "autoreload")
+        ip.run_line_magic("autoreload", "2")
+    except Exception as err:
+        print(f"Autoreload unavailable; skipping autoreload setup: {err}")
 
 import torch
 import torch.nn as nn
