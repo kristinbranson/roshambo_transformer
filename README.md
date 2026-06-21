@@ -82,7 +82,7 @@ These raw data files are not part of this repository. The notebooks download the
 
 ## Further reading on Rock-Paper-Scissors strategies:
 
-- Cross et al. (2025), "Understanding Human Limits in Pattern Recognition: A Computational Model of Sequential Reasoning in Rock, Paper, Scissors": [\[link\]](https://arxiv.org/abs/2508.0650)3. Models human play against Brockbank & Vul's bots with a hypothesis-generating LLM agent, arguing that people detect simple patterns more readily than complex dependencies.
+- Cross et al. (2025), "Understanding Human Limits in Pattern Recognition: A Computational Model of Sequential Reasoning in Rock, Paper, Scissors": [\[link\]](https://arxiv.org/abs/2508.0650). Models human play against Brockbank & Vul's bots with a hypothesis-generating LLM agent, arguing that people detect simple patterns more readily than complex dependencies.
 - Wang et al. (2026), "Discovering Differences in Strategic Behavior Between Humans and LLMs": [\[link\]](https://arxiv.org/abs/2602.10324v2). Uses program discovery to find interpretable models of human and LLM behavior in iterated RPS, highlighting structural differences in strategic reasoning.
 - Zhou (2019), "The Rock-Paper-Scissors Game": [\[link\]](https://arxiv.org/abs/1903.05991). A tutorial-style review of RPS as a model of cyclic dominance, Nash equilibrium, evolutionary stability, and non-equilibrium dynamics.
 - Batzilis et al. (2019), "Behavior in Strategic Settings: Evidence from a Million Rock-Paper-Scissors Games": [\[link\]](https://www.mdpi.com/2073-4336/10/2/18). Analyzes a large Facebook RPS dataset to ask whether human play in a simple strategic setting matches Nash and related behavioral-game-theory predictions.
