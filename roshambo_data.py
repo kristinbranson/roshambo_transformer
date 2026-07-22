@@ -1433,6 +1433,8 @@ display(full_game.show(start=len(prompt_game)))
 # %%
 from torch.utils.data._utils.collate import default_collate
 
+# this code is setup to work with transformer models, not logistic regression model
+
 def WSLS_strategy_labels(x,y):
     """
     Create labels for the win-stay lose-shift (WSLS) strategy, which is a simple heuristic that many humans use in RPS.
@@ -1677,6 +1679,7 @@ def probe(
     batch_size=None,
     lr=1e-3,
     weight_decay=1e-3,
+    d_embed=None,
 ):
     device = next(model.parameters()).device
     batch_size = model_params["batch_size"] if batch_size is None else batch_size
@@ -1714,7 +1717,9 @@ def probe(
             collate_fn_factory=collate_fn_factory,
         )
 
-    d_embed = model.head.in_features
+    if d_embed is None:
+        assert hasattr(model, "head") and hasattr(model.head, "in_features"), "model must have a head with in_features attribute to infer d_embed"
+        d_embed = model.head.in_features
     decoder = nn.Linear(d_embed, 1).to(device)
 
     opt = torch.optim.AdamW(decoder.parameters(), lr=lr, weight_decay=weight_decay)
