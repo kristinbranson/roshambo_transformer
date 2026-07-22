@@ -1433,8 +1433,6 @@ display(full_game.show(start=len(prompt_game)))
 # %%
 from torch.utils.data._utils.collate import default_collate
 
-# this code is setup to work with transformer models, not logistic regression model
-
 def WSLS_strategy_labels(x,y):
     """
     Create labels for the win-stay lose-shift (WSLS) strategy, which is a simple heuristic that many humans use in RPS.
@@ -1481,6 +1479,7 @@ def get_transformer_activity_hook(model, x, layer_idx="final"):
 
     activity = {}
 
+    # modify this code to match your model components if necessary
     if layer_idx == "input":
         def hook(module, inputs, output):
             activity["h"] = inputs[0].detach()
